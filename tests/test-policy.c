@@ -750,6 +750,63 @@ static void test_band_steering(void)
 	puts("ok - band steering signal threshold");
 }
 
+/*
+ * Load comparison between two nodes. A node counts as loaded when it has at
+ * least load_kick_min_clients stations and its channel load is above
+ * load_kick_threshold.
+ */
+static void test_load(void)
+{
+	struct sta_info *other;
+
+	fixture();
+	cfg_begin();
+	cfg_apply("update_config");
+	CHECK(!exempt(EXEMPT));
+	config.assoc_steering = true;
+	config.load_kick_threshold = 50;
+	config.load_kick_min_clients = 1;
+	other = hear_on_5ghz(CONTROL);
+
+	/* Neither node is loaded, or both are: no reason to prefer one */
+	ap.node.load = ap5.node.load = 10;
+	CHECK(usteer_check_request(infos[CONTROL], EVENT_TYPE_ASSOC));
+	CHECK(usteer_check_request(other, EVENT_TYPE_ASSOC));
+	ap.node.load = ap5.node.load = 90;
+	CHECK(usteer_check_request(infos[CONTROL], EVENT_TYPE_ASSOC));
+	CHECK(usteer_check_request(other, EVENT_TYPE_ASSOC));
+
+	/*
+	 * Only the 5 GHz node is loaded: the association to it is refused,
+	 * the one to the idle node is accepted.
+	 */
+	ap.node.load = 10;
+	CHECK(usteer_check_request(infos[CONTROL], EVENT_TYPE_ASSOC));
+	CHECK(!usteer_check_request(other, EVENT_TYPE_ASSOC));
+
+	/* A node with fewer stations than the minimum is not loaded */
+	config.load_kick_min_clients = NSTA + 1;
+	CHECK(usteer_check_request(other, EVENT_TYPE_ASSOC));
+	config.load_kick_min_clients = 1;
+
+	/*
+	 * Load kick on the loaded 2.4 GHz node. The first station has the
+	 * weaker signal, but only the second one is heard by the idle 5 GHz
+	 * node: it has somewhere to go and is the one to kick.
+	 */
+	ap.node.load = 90;
+	ap5.node.load = 10;
+	infos[EXEMPT]->signal = -90;
+	infos[CONTROL]->signal = -60;
+	config.load_kick_enabled = true;
+	config.load_kick_delay = 1;
+	reset_counters();
+	run_kick_passes(2);
+	CHECK(kicks[CONTROL] == 1 && !calls[EXEMPT]);
+
+	puts("ok - load comparison for association requests and load kicks");
+}
+
 static struct blob_attr *bss_tm_query(const char *addr)
 {
 	blob_buf_init(&in, 0);
@@ -827,6 +884,7 @@ int main(void)
 	test_kicks();
 	test_roaming();
 	test_band_steering();
+	test_load();
 	test_requests_to_hostapd();
 
 	teardown();
