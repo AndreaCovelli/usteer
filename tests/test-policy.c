@@ -627,6 +627,19 @@ static void test_kicks(void)
 	puts("ok - low signal, load and scheduled kicks");
 }
 
+/* The station is heard by the 5 GHz node of the same router */
+static struct sta_info *hear_on_5ghz(int i)
+{
+	struct sta_info *si;
+	bool create;
+
+	si = usteer_sta_info_get(infos[i]->sta, &ap5.node, &create);
+	CHECK(si);
+	usteer_sta_info_update(si, -50, false);
+
+	return si;
+}
+
 static void test_roaming(void)
 {
 	struct sta_info *other[NSTA];
@@ -658,29 +671,13 @@ static void test_roaming(void)
 	fixture();
 	config.band_steering_interval = 1;
 	config.band_steering_min_snr = -90;
-	for (i = 0; i < NSTA; i++) {
-		other[i] = usteer_sta_info_get(infos[i]->sta, &ap5.node, &create);
-		other[i]->signal = -50;
-		other[i]->seen = current_time;
-	}
+	for (i = 0; i < NSTA; i++)
+		other[i] = hear_on_5ghz(i);
 	for (round = 0; round < 4; round++)
 		usteer_band_steering_perform_steer(&ap);
 	CHECK(!calls[EXEMPT] && tm[CONTROL] >= 1);
 
 	puts("ok - roam state machine and band steering");
-}
-
-/* The station is heard by the 5 GHz node of the same router */
-static struct sta_info *hear_on_5ghz(int i)
-{
-	struct sta_info *si;
-	bool create;
-
-	si = usteer_sta_info_get(infos[i]->sta, &ap5.node, &create);
-	CHECK(si);
-	usteer_sta_info_update(si, -50, false);
-
-	return si;
 }
 
 /*
@@ -704,7 +701,6 @@ static void band_steering_setup(uint32_t signal_threshold)
 	si->connected = STA_NOT_CONNECTED;
 	usteer_sta_info_update(si, -80, false);
 	si->connected = STA_CONNECTED;
-	hear_on_5ghz(CONTROL);
 }
 
 /* The station reports a signal, then the node looks for stations to steer */
@@ -735,6 +731,7 @@ static void test_band_steering(void)
 	 * connected is left alone ...
 	 */
 	band_steering_setup(5);
+	hear_on_5ghz(CONTROL);
 	band_steering_rounds(-80, 6);
 	CHECK(!calls[CONTROL] && !infos[CONTROL]->kick_time);
 
@@ -744,10 +741,25 @@ static void test_band_steering(void)
 
 	/* Without a threshold it is steered in the first interval */
 	band_steering_setup(0);
+	hear_on_5ghz(CONTROL);
 	band_steering_rounds(-80, 2);
 	CHECK(tm[CONTROL] == 1 && calls[CONTROL] == 1);
 
-	puts("ok - band steering signal threshold");
+	/*
+	 * A station that no 5 GHz node of this router has heard may only
+	 * support 2.4 GHz: it gets no request and no kick is scheduled ...
+	 */
+	band_steering_setup(0);
+	CHECK(!infos[CONTROL]->sta->seen_5ghz);
+	band_steering_rounds(-80, 6);
+	CHECK(!calls[CONTROL] && !infos[CONTROL]->kick_time);
+
+	/* ... until a 5 GHz node hears it */
+	hear_on_5ghz(CONTROL);
+	band_steering_rounds(-80, 2);
+	CHECK(tm[CONTROL] == 1 && calls[CONTROL] == 1);
+
+	puts("ok - band steering signal threshold, stations not heard on 5 GHz");
 }
 
 /*
