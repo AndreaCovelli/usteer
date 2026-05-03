@@ -17,6 +17,13 @@
  *   Copyright (C) 2020 John Crispin <john@phrozen.org> 
  */
 
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <net/ethernet.h>
+#ifdef linux
+#include <netinet/ether.h>
+#endif
+
 #include "usteer.h"
 
 static int
@@ -27,6 +34,44 @@ avl_macaddr_cmp(const void *k1, const void *k2, void *ptr)
 
 AVL_TREE(stations, avl_macaddr_cmp, false, NULL);
 static struct usteer_timeout_queue tq;
+
+void config_set_policy_exempt_sta_list(struct blob_attr *data)
+{
+	free(config.policy_exempt_sta_list);
+
+	if (data && blobmsg_len(data) &&
+	    blobmsg_check_attr_list(data, BLOBMSG_TYPE_STRING))
+		config.policy_exempt_sta_list = blob_memdup(data);
+	else
+		config.policy_exempt_sta_list = NULL;
+}
+
+void config_get_policy_exempt_sta_list(struct blob_buf *buf)
+{
+	if (config.policy_exempt_sta_list)
+		blobmsg_add_blob(buf, config.policy_exempt_sta_list);
+}
+
+bool usteer_sta_is_policy_exempt(const uint8_t *addr)
+{
+	struct blob_attr *cur;
+	int rem;
+
+	if (!addr || !config.policy_exempt_sta_list)
+		return false;
+
+	blobmsg_for_each_attr(cur, config.policy_exempt_sta_list, rem) {
+		uint8_t *exempt = (uint8_t *) ether_aton(blobmsg_get_string(cur));
+
+		if (!exempt)
+			continue;
+
+		if (!memcmp(exempt, addr, 6))
+			return true;
+	}
+
+	return false;
+}
 
 static void
 usteer_sta_del(struct sta *sta)

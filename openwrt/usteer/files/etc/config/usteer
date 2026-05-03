@@ -153,3 +153,7 @@ config usteer
 
 	# List of SSIDs to enable steering on
 	#list ssid_list ''
+
+	# List of station MAC addresses to exempt from steering policy decisions,
+	# including automated kicks
+	#list policy_exempt_sta_list ''

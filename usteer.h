@@ -206,6 +206,7 @@ struct usteer_config {
 	uint32_t event_log_mask;
 
 	struct blob_attr *ssid_list;
+	struct blob_attr *policy_exempt_sta_list;
 };
 
 struct usteer_bss_tm_query {
@@ -349,6 +350,7 @@ struct sta_info *usteer_sta_info_get(struct sta *sta, struct usteer_node *node, 
 
 bool usteer_sta_supports_beacon_measurement_mode(struct sta_info *si, enum usteer_beacon_measurement_mode mode);
 bool usteer_sta_supports_link_measurement(struct sta_info *si);
+bool usteer_sta_is_policy_exempt(const uint8_t *addr);
 
 void usteer_sta_disconnected(struct sta_info *si);
 void usteer_sta_info_update_timeout(struct sta_info *si, int timeout);
@@ -375,6 +377,9 @@ void config_get_node_up_script(struct blob_buf *buf);
 
 void config_set_ssid_list(struct blob_attr *data);
 void config_get_ssid_list(struct blob_buf *buf);
+
+void config_set_policy_exempt_sta_list(struct blob_attr *data);
+void config_get_policy_exempt_sta_list(struct blob_buf *buf);
 
 int usteer_interface_init(void);
 void usteer_interface_add(const char *name);

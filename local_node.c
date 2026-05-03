@@ -694,6 +694,9 @@ usteer_local_node_request_link_measurement(struct usteer_local_node *ln)
 		if (si->connected != STA_CONNECTED)
 			continue;
 
+		if (usteer_sta_is_policy_exempt(si->sta->addr))
+			continue;
+
 		usteer_ubus_trigger_link_measurement(si);
 	}
 }
@@ -742,6 +745,9 @@ usteer_local_node_process_bss_tm_queries(struct uloop_timeout *timeout)
 	list_for_each_entry_safe(query, tmp, &ln->bss_tm_queries, list) {
 		sta = usteer_sta_get(query->sta_addr, false);
 		if (!sta)
+			continue;
+
+		if (usteer_sta_is_policy_exempt(sta->addr))
 			continue;
 
 		si = usteer_sta_info_get(sta, node, false);

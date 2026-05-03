@@ -176,6 +176,9 @@ usteer_check_request(struct sta_info *si, enum usteer_event_type type)
 	int min_signal;
 	bool ret = true;
 
+	if (usteer_sta_is_policy_exempt(si->sta->addr))
+		goto out;
+
 	if (type == EVENT_TYPE_PROBE && !config.probe_steering)
 		goto out;
 
@@ -381,6 +384,9 @@ usteer_roam_trigger_sm(struct usteer_local_node *ln, struct sta_info *si)
 
 bool usteer_policy_can_perform_roam(struct sta_info *si)
 {
+	if (usteer_sta_is_policy_exempt(si->sta->addr))
+		return false;
+
 	/* Only trigger for connected STAs */
 	if (si->connected != STA_CONNECTED)
 		return false;
@@ -465,6 +471,11 @@ usteer_local_node_snr_kick(struct usteer_local_node *ln)
 	ev.threshold.ref = min_signal;
 
 	list_for_each_entry(si, &ln->node.sta_info, node_list) {
+		if (usteer_sta_is_policy_exempt(si->sta->addr)) {
+			si->below_min_snr = 0;
+			continue;
+		}
+
 		if (si->connected != STA_CONNECTED)
 			continue;
 
@@ -536,6 +547,9 @@ usteer_local_node_load_kick(struct usteer_local_node *ln)
 	list_for_each_entry(si, &ln->node.sta_info, node_list) {
 		struct sta_info *tmp;
 
+		if (usteer_sta_is_policy_exempt(si->sta->addr))
+			continue;
+
 		if (si->connected != STA_CONNECTED)
 			continue;
 
@@ -581,6 +595,11 @@ usteer_local_node_perform_kick(struct usteer_local_node *ln)
 	list_for_each_entry(si, &ln->node.sta_info, node_list) {
 		if (!si->kick_time || si->kick_time > current_time)
 			continue;
+
+		if (usteer_sta_is_policy_exempt(si->sta->addr)) {
+			si->kick_time = 0;
+			continue;
+		}
 
 		usteer_ubus_kick_client(si);
 	}
