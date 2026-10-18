@@ -39,6 +39,12 @@ blobmsg_open_table_mac(struct blob_buf *buf, uint8_t *addr)
 	return blobmsg_open_table(buf, str);
 }
 
+static bool
+usteer_ubus_sta_policy_exempt(struct sta_info *si)
+{
+	return si && si->sta && usteer_sta_is_policy_exempt(si->sta->addr);
+}
+
 static int
 usteer_ubus_get_clients(struct ubus_context *ctx, struct ubus_object *obj,
 		       struct ubus_request_data *req, const char *method,
@@ -55,6 +61,8 @@ usteer_ubus_get_clients(struct ubus_context *ctx, struct ubus_object *obj,
 			_cur_n = blobmsg_open_table(&b, usteer_node_name(si->node));
 			blobmsg_add_u8(&b, "connected", si->connected);
 			blobmsg_add_u32(&b, "signal", si->signal);
+			blobmsg_add_u8(&b, "policy_exempt",
+					usteer_sta_is_policy_exempt(sta->addr));
 			blobmsg_close_table(&b, _cur_n);
 		}
 		blobmsg_close_table(&b, _s);
@@ -111,6 +119,8 @@ usteer_ubus_get_client_info(struct ubus_context *ctx, struct ubus_object *obj,
 		_cur_n = blobmsg_open_table(&b, usteer_node_name(si->node));
 		blobmsg_add_u8(&b, "connected", si->connected);
 		blobmsg_add_u32(&b, "signal", si->signal);
+		blobmsg_add_u8(&b, "policy_exempt",
+				usteer_sta_is_policy_exempt(sta->addr));
 		_s = blobmsg_open_table(&b, "stats");
 		for (i = 0; i < __EVENT_TYPE_MAX; i++)
 			usteer_ubus_add_stats(&si->stats[EVENT_TYPE_PROBE], event_types[i]);
@@ -190,7 +200,8 @@ struct cfg_item {
 	_cfg(ARRAY_CB, interfaces), \
 	_cfg(STRING_CB, node_up_script), \
 	_cfg(ARRAY_CB, event_log_types), \
-	_cfg(ARRAY_CB, ssid_list)
+	_cfg(ARRAY_CB, ssid_list), \
+	_cfg(ARRAY_CB, policy_exempt_sta_list)
 
 enum cfg_items {
 #define _cfg(_type, _name) CFG_##_name
@@ -418,6 +429,8 @@ usteer_ubus_get_connected_clients(struct ubus_context *ctx, struct ubus_object *
 
 			s = blobmsg_open_table_mac(&b, si->sta->addr);
 			blobmsg_add_u32(&b, "signal", si->signal);
+			blobmsg_add_u8(&b, "policy_exempt",
+					usteer_sta_is_policy_exempt(si->sta->addr));
 			blobmsg_add_u64(&b, "created", current_time - si->created);
 			blobmsg_add_u64(&b, "connected", current_time - si->connected_since);
 
@@ -678,7 +691,12 @@ int usteer_ubus_bss_transition_request(struct sta_info *si,
                                        uint8_t validity_period,
                                        struct usteer_node *target_node)
 {
-	struct usteer_local_node *ln = container_of(si->node, struct usteer_local_node, node);
+	struct usteer_local_node *ln;
+
+	if (usteer_ubus_sta_policy_exempt(si))
+		return 0;
+
+	ln = container_of(si->node, struct usteer_local_node, node);
 
 	blob_buf_init(&b, 0);
 	blobmsg_printf(&b, "addr", MAC_ADDR_FMT, MAC_ADDR_DATA(si->sta->addr));
@@ -710,9 +728,14 @@ int usteer_ubus_band_steering_request(struct sta_info *si,
                                       bool abridged,
                                       uint8_t validity_period)
 {
-	struct usteer_local_node *ln = container_of(si->node, struct usteer_local_node, node);
+	struct usteer_local_node *ln;
 	struct usteer_node *node;
 	void *c;
+
+	if (usteer_ubus_sta_policy_exempt(si))
+		return 0;
+
+	ln = container_of(si->node, struct usteer_local_node, node);
 
 	blob_buf_init(&b, 0);
 	blobmsg_printf(&b, "addr", MAC_ADDR_FMT, MAC_ADDR_DATA(si->sta->addr));
@@ -744,7 +767,12 @@ int usteer_ubus_band_steering_request(struct sta_info *si,
 
 int usteer_ubus_trigger_link_measurement(struct sta_info *si)
 {
-	struct usteer_local_node *ln = container_of(si->node, struct usteer_local_node, node);
+	struct usteer_local_node *ln;
+
+	if (usteer_ubus_sta_policy_exempt(si))
+		return 0;
+
+	ln = container_of(si->node, struct usteer_local_node, node);
 
 	if (!usteer_sta_supports_link_measurement(si))
 		return 0;
@@ -758,7 +786,12 @@ int usteer_ubus_trigger_link_measurement(struct sta_info *si)
 
 int usteer_ubus_trigger_client_scan(struct sta_info *si)
 {
-	struct usteer_local_node *ln = container_of(si->node, struct usteer_local_node, node);
+	struct usteer_local_node *ln;
+
+	if (usteer_ubus_sta_policy_exempt(si))
+		return 0;
+
+	ln = container_of(si->node, struct usteer_local_node, node);
 
 	if (!usteer_sta_supports_beacon_measurement_mode(si, BEACON_MEASUREMENT_ACTIVE)) {
 		MSG(DEBUG, "STA does not support beacon measurement sta=" MAC_ADDR_FMT "\n", MAC_ADDR_DATA(si->sta->addr));
@@ -779,7 +812,12 @@ int usteer_ubus_trigger_client_scan(struct sta_info *si)
 
 void usteer_ubus_kick_client(struct sta_info *si, uint32_t kick_reason_code)
 {
-	struct usteer_local_node *ln = container_of(si->node, struct usteer_local_node, node);
+	struct usteer_local_node *ln;
+
+	if (usteer_ubus_sta_policy_exempt(si))
+		return;
+
+	ln = container_of(si->node, struct usteer_local_node, node);
 
 	blob_buf_init(&b, 0);
 	blobmsg_printf(&b, "addr", MAC_ADDR_FMT, MAC_ADDR_DATA(si->sta->addr));

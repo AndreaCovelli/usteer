@@ -173,3 +173,9 @@ config usteer
 
 	# List of SSIDs to enable steering on
 	#list ssid_list ''
+
+	# List of station MAC addresses to exempt from steering policy decisions,
+	# including automated kicks. Each node only applies its own list, so
+	# configure it on every node. Exempt stations still count towards the
+	# node load used for load kicks.
+	#list policy_exempt_sta_list ''
