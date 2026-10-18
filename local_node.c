@@ -139,6 +139,12 @@ usteer_handle_bss_tm_query(struct usteer_local_node *ln, struct blob_attr *msg)
 
 	memcpy(query->sta_addr, sta_addr, 6);
 
+	/* Let hostapd answer queries from stations exempt from steering */
+	if (usteer_sta_is_policy_exempt(query->sta_addr)) {
+		free(query);
+		return 0;
+	}
+
 	list_add(&query->list, &ln->bss_tm_queries);
 	uloop_timeout_set(&ln->bss_tm_queries_timeout, 1);
 
@@ -694,6 +700,9 @@ usteer_local_node_request_link_measurement(struct usteer_local_node *ln)
 
 	list_for_each_entry(si, &node->sta_info, node_list) {
 		if (si->connected != STA_CONNECTED)
+			continue;
+
+		if (usteer_sta_is_policy_exempt(si->sta->addr))
 			continue;
 
 		usteer_ubus_trigger_link_measurement(si);
