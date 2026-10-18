@@ -17,6 +17,13 @@
  *   Copyright (C) 2020 John Crispin <john@phrozen.org> 
  */
 
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <net/ethernet.h>
+#ifdef linux
+#include <netinet/ether.h>
+#endif
+
 #include "usteer.h"
 
 static int
@@ -27,6 +34,74 @@ avl_macaddr_cmp(const void *k1, const void *k2, void *ptr)
 
 AVL_TREE(stations, avl_macaddr_cmp, false, NULL);
 static struct usteer_timeout_queue tq;
+
+static struct ether_addr *policy_exempt_addrs;
+static unsigned int n_policy_exempt_addrs;
+
+void config_set_policy_exempt_sta_list(struct blob_attr *data)
+{
+	struct blob_attr *cur;
+	unsigned int n = 0;
+	int rem;
+
+	free(config.policy_exempt_sta_list);
+	config.policy_exempt_sta_list = NULL;
+	free(policy_exempt_addrs);
+	policy_exempt_addrs = NULL;
+	n_policy_exempt_addrs = 0;
+
+	if (!data || !blobmsg_len(data))
+		return;
+
+	config.policy_exempt_sta_list = blob_memdup(data);
+	if (!config.policy_exempt_sta_list)
+		return;
+
+	blobmsg_for_each_attr(cur, config.policy_exempt_sta_list, rem)
+		n++;
+
+	policy_exempt_addrs = calloc(n, sizeof(*policy_exempt_addrs));
+	if (!policy_exempt_addrs)
+		return;
+
+	blobmsg_for_each_attr(cur, config.policy_exempt_sta_list, rem) {
+		struct ether_addr *addr = &policy_exempt_addrs[n_policy_exempt_addrs];
+
+		if (blobmsg_type(cur) != BLOBMSG_TYPE_STRING) {
+			MSG(INFO, "Ignoring non-string policy_exempt_sta_list entry\n");
+			continue;
+		}
+
+		if (!ether_aton_r(blobmsg_get_string(cur), addr)) {
+			MSG(INFO, "Ignoring invalid policy_exempt_sta_list entry '%s'\n",
+			    blobmsg_get_string(cur));
+			continue;
+		}
+
+		n_policy_exempt_addrs++;
+	}
+}
+
+void config_get_policy_exempt_sta_list(struct blob_buf *buf)
+{
+	if (config.policy_exempt_sta_list)
+		blobmsg_add_blob(buf, config.policy_exempt_sta_list);
+}
+
+bool usteer_sta_is_policy_exempt(const uint8_t *addr)
+{
+	unsigned int i;
+
+	if (!addr)
+		return false;
+
+	for (i = 0; i < n_policy_exempt_addrs; i++) {
+		if (!memcmp(&policy_exempt_addrs[i], addr, 6))
+			return true;
+	}
+
+	return false;
+}
 
 static void
 usteer_sta_del(struct sta *sta)
