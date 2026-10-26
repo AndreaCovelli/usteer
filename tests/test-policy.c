@@ -670,6 +670,86 @@ static void test_roaming(void)
 	puts("ok - roam state machine and band steering");
 }
 
+/* The station is heard by the 5 GHz node of the same router */
+static struct sta_info *hear_on_5ghz(int i)
+{
+	struct sta_info *si;
+	bool create;
+
+	si = usteer_sta_info_get(infos[i]->sta, &ap5.node, &create);
+	CHECK(si);
+	usteer_sta_info_update(si, -50, false);
+
+	return si;
+}
+
+/*
+ * Band steering on the 2.4 GHz node with a signal threshold. The control
+ * station is first heard while it is not connected, like a station that
+ * probes before it associates, so that its reference signal is taken when
+ * it connects.
+ */
+static void band_steering_setup(uint32_t signal_threshold)
+{
+	struct sta_info *si;
+
+	fixture();
+	cfg_begin();
+	blobmsg_add_u32(&in, "band_steering_interval", 1);
+	blobmsg_add_u32(&in, "band_steering_min_snr", (uint32_t) -90);
+	blobmsg_add_u32(&in, "band_steering_signal_threshold", signal_threshold);
+	cfg_apply("update_config");
+
+	si = infos[CONTROL];
+	si->connected = STA_NOT_CONNECTED;
+	usteer_sta_info_update(si, -80, false);
+	si->connected = STA_CONNECTED;
+	hear_on_5ghz(CONTROL);
+}
+
+/* The station reports a signal, then the node looks for stations to steer */
+static void band_steering_rounds(int signal, int n)
+{
+	while (n--) {
+		usteer_sta_info_update(infos[CONTROL], signal, true);
+		usteer_band_steering_perform_steer(&ap);
+	}
+}
+
+static void test_band_steering(void)
+{
+	struct blob_attr *attr;
+
+	/* The signal threshold reaches the daemon and is reported back */
+	fixture();
+	cfg_begin();
+	blobmsg_add_u32(&in, "band_steering_signal_threshold", 7);
+	cfg_apply("set_config");
+	CHECK(config.band_steering_signal_threshold == 7);
+	get_config();
+	attr = field(reply, "band_steering_signal_threshold");
+	CHECK(attr && blobmsg_get_u32(attr) == 7);
+
+	/*
+	 * With a threshold, a station whose signal stays where it was when it
+	 * connected is left alone ...
+	 */
+	band_steering_setup(5);
+	band_steering_rounds(-80, 6);
+	CHECK(!calls[CONTROL] && !infos[CONTROL]->kick_time);
+
+	/* ... until the signal is better by the threshold */
+	band_steering_rounds(-75, 4);
+	CHECK(tm[CONTROL] == 1 && calls[CONTROL] == 1);
+
+	/* Without a threshold it is steered in the first interval */
+	band_steering_setup(0);
+	band_steering_rounds(-80, 2);
+	CHECK(tm[CONTROL] == 1 && calls[CONTROL] == 1);
+
+	puts("ok - band steering signal threshold");
+}
+
 static struct blob_attr *bss_tm_query(const char *addr)
 {
 	blob_buf_init(&in, 0);
@@ -746,6 +826,7 @@ int main(void)
 	test_requests();
 	test_kicks();
 	test_roaming();
+	test_band_steering();
 	test_requests_to_hostapd();
 
 	teardown();
