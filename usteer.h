@@ -375,6 +375,7 @@ bool usteer_sta_is_policy_exempt(const uint8_t *addr);
 void usteer_sta_disconnected(struct sta_info *si);
 void usteer_sta_info_update_timeout(struct sta_info *si, int timeout);
 void usteer_sta_info_update(struct sta_info *si, int signal, bool avg);
+void usteer_sta_config_update(void);
 
 static inline const char *usteer_node_name(struct usteer_node *node)
 {

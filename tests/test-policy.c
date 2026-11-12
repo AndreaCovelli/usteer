@@ -428,6 +428,19 @@ static uint32_t aggressiveness_of(const char *addr_str)
 	return sta->aggressiveness;
 }
 
+/* A station that is already known: no entry is created for it */
+static uint32_t known_aggressiveness_of(const char *addr_str)
+{
+	uint8_t *addr = (uint8_t *) ether_aton(addr_str);
+	struct sta *sta;
+
+	CHECK(addr);
+	sta = usteer_sta_get(addr, false);
+	CHECK(sta);
+
+	return sta->aggressiveness;
+}
+
 static void test_aggressiveness_list(void)
 {
 	void *a;
@@ -469,7 +482,40 @@ static void test_aggressiveness_list(void)
 	CHECK(!field(reply, "aggressiveness_mac_list"));
 	CHECK(aggressiveness_of("02:00:00:00:00:1d") == 3);
 
-	puts("ok - aggressiveness list: malformed entries, lookup, clear");
+	/* ... also for the stations that were created while it was set */
+	CHECK(known_aggressiveness_of("02:00:00:00:00:1a") == 3);
+	CHECK(known_aggressiveness_of("02:00:00:00:00:1b") == 3);
+
+	/*
+	 * A reload reaches the stations that are already known: a new entry,
+	 * a changed entry, a removed entry and a new default.
+	 */
+	cfg_begin();
+	cfg_list("aggressiveness_mac_list", "02:00:00:00:00:1a,2",
+		 "02:00:00:00:00:1c,4", NULL);
+	cfg_apply("set_config");
+	CHECK(known_aggressiveness_of("02:00:00:00:00:1a") == 2);
+	CHECK(known_aggressiveness_of("02:00:00:00:00:1b") == 3);
+	CHECK(known_aggressiveness_of("02:00:00:00:00:1c") == 4);
+
+	cfg_begin();
+	blobmsg_add_u32(&in, "aggressiveness", 1);
+	cfg_list("aggressiveness_mac_list", "02:00:00:00:00:1a,0", NULL);
+	cfg_apply("set_config");
+	CHECK(known_aggressiveness_of("02:00:00:00:00:1a") == 0);
+	CHECK(known_aggressiveness_of("02:00:00:00:00:1b") == 1);
+	CHECK(known_aggressiveness_of("02:00:00:00:00:1c") == 1);
+	CHECK(known_aggressiveness_of("02:00:00:00:00:1d") == 1);
+
+	/* update_config keeps the default it does not mention */
+	cfg_begin();
+	cfg_list("aggressiveness_mac_list", "02:00:00:00:00:1b,4", NULL);
+	cfg_apply("update_config");
+	CHECK(config.aggressiveness == 1);
+	CHECK(known_aggressiveness_of("02:00:00:00:00:1a") == 1);
+	CHECK(known_aggressiveness_of("02:00:00:00:00:1b") == 4);
+
+	puts("ok - aggressiveness list: malformed entries, lookup, clear, reload");
 }
 
 /*

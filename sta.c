@@ -201,6 +201,19 @@ usteer_sta_update_aggressiveness(struct sta *sta)
 	}
 }
 
+/*
+ * The level is cached in struct sta: stations that are already known have to
+ * be looked up again when aggressiveness or aggressiveness_mac_list change.
+ */
+void
+usteer_sta_config_update(void)
+{
+	struct sta *sta;
+
+	avl_for_each_element(&stations, sta, avl)
+		usteer_sta_update_aggressiveness(sta);
+}
+
 struct sta_info *
 usteer_sta_info_get(struct sta *sta, struct usteer_node *node, bool *create)
 {
