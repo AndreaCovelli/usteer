@@ -34,6 +34,12 @@
 AVL_TREE(local_nodes, avl_strcmp, false, NULL);
 static struct blob_buf b;
 static char *node_up_script;
+/*
+ * Kept outside struct usteer_config: set_config clears that struct with
+ * usteer_init_defaults() before calling the setters, which would drop the
+ * only reference to the previous list.
+ */
+static struct blob_attr *ssid_list;
 
 static void
 usteer_local_node_state_reset(struct usteer_local_node *ln)
@@ -815,11 +821,11 @@ usteer_node_run_update_script(struct usteer_node *node)
 static void
 usteer_check_node_enabled(struct usteer_local_node *ln)
 {
-	bool ssid_disabled = config.ssid_list;
+	bool ssid_disabled = ssid_list;
 	struct blob_attr *cur;
 	int rem;
 
-	blobmsg_for_each_attr(cur, config.ssid_list, rem) {
+	blobmsg_for_each_attr(cur, ssid_list, rem) {
 		if (strcmp(blobmsg_get_string(cur), ln->node.ssid) != 0)
 			continue;
 
@@ -971,12 +977,12 @@ void config_set_ssid_list(struct blob_attr *data)
 {
 	struct usteer_local_node *ln;
 
-	free(config.ssid_list);
+	free(ssid_list);
 
 	if (data && blobmsg_len(data))
-		config.ssid_list = blob_memdup(data);
+		ssid_list = blob_memdup(data);
 	else
-		config.ssid_list = NULL;
+		ssid_list = NULL;
 
 	avl_for_each_element(&local_nodes, ln, node.avl)
 		usteer_check_node_enabled(ln);
@@ -984,8 +990,8 @@ void config_set_ssid_list(struct blob_attr *data)
 
 void config_get_ssid_list(struct blob_buf *buf)
 {
-	if (config.ssid_list)
-		blobmsg_add_blob(buf, config.ssid_list);
+	if (ssid_list)
+		blobmsg_add_blob(buf, ssid_list);
 }
 
 void
