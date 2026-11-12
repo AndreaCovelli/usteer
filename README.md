@@ -19,6 +19,16 @@ usteer is available from the OpenWrt packages feed and can be installed on devic
 opkg update; opkg install usteer
 ```
 
+## Tests
+
+`tests/run.sh` builds the host tests for the list options of `set_config` and for the station policy exemption list, and runs them twice: as a plain build, then with AddressSanitizer, UndefinedBehaviorSanitizer and LeakSanitizer.
+
+The tests need libubox built for the host and the libubus header. With an OpenWrt SDK in which the ubus package is compiled:
+
+```
+tests/run.sh "$SDK/staging_dir/host" "$SDK"/staging_dir/target-*/usr/include
+```
+
 ## Submitting patches
 
 usteer patches are welcome on the openwrt-devel mailing list.
