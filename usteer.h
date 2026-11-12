@@ -217,8 +217,6 @@ struct usteer_config {
 
 	const char *node_up_script;
 	uint32_t event_log_mask;
-
-	struct blob_attr *ssid_list;
 };
 
 struct usteer_bss_tm_query {
