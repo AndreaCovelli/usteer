@@ -38,11 +38,28 @@ static struct usteer_timeout_queue tq;
 /*
  * Kept outside struct usteer_config: set_config clears that struct with
  * usteer_init_defaults() before calling the setters, which would drop the
- * only reference to the previous list.
+ * only reference to the previous lists.
  */
+static struct blob_attr *aggressiveness_mac_list;
 static struct blob_attr *policy_exempt_sta_list;
 static struct ether_addr *policy_exempt_addrs;
 static unsigned int n_policy_exempt_addrs;
+
+void config_set_aggressiveness_mac_list(struct blob_attr *data)
+{
+	free(aggressiveness_mac_list);
+
+	if (data && blobmsg_len(data))
+		aggressiveness_mac_list = blob_memdup(data);
+	else
+		aggressiveness_mac_list = NULL;
+}
+
+void config_get_aggressiveness_mac_list(struct blob_buf *buf)
+{
+	if (aggressiveness_mac_list)
+		blobmsg_add_blob(buf, aggressiveness_mac_list);
+}
 
 void config_set_policy_exempt_sta_list(struct blob_attr *data)
 {
@@ -168,7 +185,7 @@ usteer_sta_update_aggressiveness(struct sta *sta)
 
 	snprintf(sta_mac, sizeof(sta_mac), MAC_ADDR_FMT, MAC_ADDR_DATA(sta->addr));
 	sta->aggressiveness = config.aggressiveness;
-	blobmsg_for_each_attr(cur, config.aggressiveness_mac_list, rem) {
+	blobmsg_for_each_attr(cur, aggressiveness_mac_list, rem) {
 		if (blobmsg_type(cur) != BLOBMSG_TYPE_STRING ||
 		    !blobmsg_check_attr(cur, false))
 			continue;

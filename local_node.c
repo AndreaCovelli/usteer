@@ -995,22 +995,6 @@ void config_get_ssid_list(struct blob_buf *buf)
 		blobmsg_add_blob(buf, ssid_list);
 }
 
-void config_set_aggressiveness_mac_list(struct blob_attr *data)
-{
-	free(config.aggressiveness_mac_list);
-
-	if (data && blobmsg_len(data))
-		config.aggressiveness_mac_list = blob_memdup(data);
-	else
-		config.aggressiveness_mac_list = NULL;
-}
-
-void config_get_aggressiveness_mac_list(struct blob_buf *buf)
-{
-	if (config.aggressiveness_mac_list)
-		blobmsg_add_blob(buf, config.aggressiveness_mac_list);
-}
-
 void usteer_local_nodes_init(struct ubus_context *ctx)
 {
 	usteer_register_events(ctx);
