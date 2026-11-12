@@ -162,22 +162,24 @@ static void
 usteer_sta_update_aggressiveness(struct sta *sta)
 {
 	struct blob_attr *cur;
-	int rem;
+	const char *entry;
 	char sta_mac[18];
-	char config_entry[20];
-	char config_mac[18];
-	
-	sprintf(sta_mac, MAC_ADDR_FMT, MAC_ADDR_DATA(sta->addr));
+	int rem;
+
+	snprintf(sta_mac, sizeof(sta_mac), MAC_ADDR_FMT, MAC_ADDR_DATA(sta->addr));
 	sta->aggressiveness = config.aggressiveness;
 	blobmsg_for_each_attr(cur, config.aggressiveness_mac_list, rem) {
-		strcpy(config_entry, blobmsg_get_string(cur));
-		if (strlen(config_entry) != 19)
+		if (blobmsg_type(cur) != BLOBMSG_TYPE_STRING ||
+		    !blobmsg_check_attr(cur, false))
 			continue;
-		strncpy(config_mac, config_entry, 18);
-		config_mac[17] = '\0';
-		if (strcmp(config_mac, sta_mac) != 0)
+
+		/* "xx:xx:xx:xx:xx:xx,N" */
+		entry = blobmsg_get_string(cur);
+		if (strlen(entry) != 19)
 			continue;
-		sta->aggressiveness = config_entry[18] - '0';
+		if (strncmp(entry, sta_mac, 17) != 0)
+			continue;
+		sta->aggressiveness = entry[18] - '0';
 		break;
 	}
 }
