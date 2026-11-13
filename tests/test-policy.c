@@ -76,7 +76,7 @@ static struct usteer_local_node ap, ap5;
 static struct sta_info *infos[NSTA];
 static unsigned int calls[NSTA], kicks[NSTA], tm[NSTA], lm[NSTA], scans[NSTA];
 static unsigned int n_exempt_log;
-static struct blob_attr *reply;
+static struct blob_attr *reply, *request;
 static struct blob_buf in;
 
 /* Logging: count the messages about rejected exemption list entries */
@@ -146,7 +146,10 @@ static struct blob_attr *field(struct blob_attr *table, const char *name)
 	return NULL;
 }
 
-/* Every request to hostapd ends here: count it per station and method */
+/*
+ * Every request to hostapd ends here: count it per station and method, and
+ * keep the last one
+ */
 int ubus_invoke_fd(struct ubus_context *ctx, uint32_t obj, const char *method,
 		   struct blob_attr *msg, ubus_data_handler_t cb, void *priv,
 		   int timeout, int fd)
@@ -155,6 +158,9 @@ int ubus_invoke_fd(struct ubus_context *ctx, uint32_t obj, const char *method,
 	int i;
 
 	CHECK(addr);
+	free(request);
+	request = blob_memdup(msg);
+	CHECK(request);
 	for (i = 0; i < NSTA; i++) {
 		if (strcmp(blobmsg_get_string(addr), addresses[i]))
 			continue;
@@ -819,6 +825,55 @@ static void test_load(void)
 	puts("ok - load comparison for association requests and load kicks");
 }
 
+static bool request_u32(const char *name, uint32_t *val)
+{
+	struct blob_attr *attr = field(request, name);
+
+	if (!attr || blobmsg_type(attr) != BLOBMSG_TYPE_INT32)
+		return false;
+
+	*val = blobmsg_get_u32(attr);
+
+	return true;
+}
+
+/*
+ * The reassociation delay is sent with every request that announces a
+ * disassociation, and only with those: hostapd refuses it otherwise.
+ */
+static void test_reassociation_delay(void)
+{
+	struct blob_attr *attr;
+	uint32_t val;
+
+	fixture();
+	CHECK(config.reassociation_delay == 30);
+	cfg_begin();
+	blobmsg_add_u32(&in, "reassociation_delay", 7);
+	cfg_apply("update_config");
+	CHECK(config.reassociation_delay == 7);
+	get_config();
+	attr = field(reply, "reassociation_delay");
+	CHECK(attr && blobmsg_get_u32(attr) == 7);
+
+	CHECK(!usteer_ubus_bss_transition_request(infos[CONTROL], 1, true, 0, true, 100, NULL));
+	CHECK(tm[CONTROL] == 1 && request_u32("reassoc_delay", &val) && val == 7);
+	CHECK(!usteer_ubus_band_steering_request(infos[CONTROL], 0, true, 0, true, 100));
+	CHECK(tm[CONTROL] == 2 && request_u32("reassoc_delay", &val) && val == 7);
+
+	CHECK(!usteer_ubus_bss_transition_request(infos[CONTROL], 1, false, 0, true, 100, NULL));
+	CHECK(tm[CONTROL] == 3 && !field(request, "reassoc_delay"));
+	CHECK(!usteer_ubus_band_steering_request(infos[CONTROL], 0, false, 0, true, 100));
+	CHECK(tm[CONTROL] == 4 && !field(request, "reassoc_delay"));
+
+	/* A reload without the option restores the default */
+	cfg_begin();
+	cfg_apply("set_config");
+	CHECK(config.reassociation_delay == 30);
+
+	puts("ok - reassociation delay: option and requests");
+}
+
 static struct blob_attr *bss_tm_query(const char *addr)
 {
 	blob_buf_init(&in, 0);
@@ -897,6 +952,7 @@ int main(void)
 	test_roaming();
 	test_band_steering();
 	test_load();
+	test_reassociation_delay();
 	test_requests_to_hostapd();
 
 	teardown();
@@ -904,6 +960,7 @@ int main(void)
 	config_set_aggressiveness_mac_list(NULL);
 	config_set_ssid_list(NULL);
 	free(reply);
+	free(request);
 	blob_buf_free(&in);
 	blob_buf_free(&b);
 	blob_buf_free(&local_node_blob);

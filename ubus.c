@@ -173,6 +173,7 @@ struct cfg_item {
 	_cfg(U32, remote_node_timeout), \
 	_cfg(BOOL, assoc_steering), \
 	_cfg(U32, aggressiveness), \
+	_cfg(U32, reassociation_delay), \
 	_cfg(ARRAY_CB, aggressiveness_mac_list), \
 	_cfg(U32, aggressive_disassoc_timer), \
 	_cfg(I32, min_connect_snr), \
