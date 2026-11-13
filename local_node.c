@@ -108,6 +108,28 @@ usteer_handle_remove(struct ubus_context *ctx, struct ubus_subscriber *s,
 	usteer_free_node(ctx, ln);
 }
 
+/*
+ * hostapd sends the dialog token and the status code of its BSS transition
+ * notifications as 8-bit integers up to OpenWrt 25.12 and as 32-bit integers
+ * after it. Accept any integer width, but only values that fit the field.
+ */
+static bool
+usteer_blobmsg_get_u8(struct blob_attr *attr, uint8_t *val)
+{
+	uint64_t tmp;
+
+	if (!attr)
+		return false;
+
+	tmp = blobmsg_cast_u64(attr);
+	if (tmp > UINT8_MAX)
+		return false;
+
+	*val = tmp;
+
+	return true;
+}
+
 static int
 usteer_handle_bss_tm_query(struct usteer_local_node *ln, struct blob_attr *msg)
 {
@@ -119,23 +141,25 @@ usteer_handle_bss_tm_query(struct usteer_local_node *ln, struct blob_attr *msg)
 	};
 	struct blobmsg_policy policy[__BSS_TM_QUERY_MAX] = {
 		[BSS_TM_QUERY_ADDRESS] = { .name = "address", .type = BLOBMSG_TYPE_STRING },
-		[BSS_TM_QUERY_DIALOG_TOKEN] = { .name = "dialog-token", .type = BLOBMSG_TYPE_INT8 },
+		[BSS_TM_QUERY_DIALOG_TOKEN] = { .name = "dialog-token", .type = BLOBMSG_CAST_INT64 },
 		[BSS_TM_QUERY_CANDIDATE_LIST] = { .name = "candidate-list", .type = BLOBMSG_TYPE_STRING },
 	};
 	struct blob_attr *tb[__BSS_TM_QUERY_MAX];
 	struct usteer_bss_tm_query *query;
+	uint8_t dialog_token;
 	uint8_t *sta_addr;
 
 	blobmsg_parse(policy, __BSS_TM_QUERY_MAX, tb, blob_data(msg), blob_len(msg));
 
-	if (!tb[BSS_TM_QUERY_ADDRESS] || !tb[BSS_TM_QUERY_DIALOG_TOKEN])
+	if (!tb[BSS_TM_QUERY_ADDRESS] ||
+	    !usteer_blobmsg_get_u8(tb[BSS_TM_QUERY_DIALOG_TOKEN], &dialog_token))
 		return 0;
 
 	query = calloc(1, sizeof(*query));
 	if (!query)
 		return 0;
 
-	query->dialog_token = blobmsg_get_u8(tb[BSS_TM_QUERY_DIALOG_TOKEN]);
+	query->dialog_token = dialog_token;
 
 	sta_addr = (uint8_t *) ether_aton(blobmsg_get_string(tb[BSS_TM_QUERY_ADDRESS]));
 	if (!sta_addr) {
@@ -167,16 +191,18 @@ usteer_handle_bss_tm_response(struct usteer_local_node *ln, struct blob_attr *ms
 	};
 	struct blobmsg_policy policy[__BSS_TM_RESPONSE_MAX] = {
 		[BSS_TM_RESPONSE_ADDRESS] = { .name = "address", .type = BLOBMSG_TYPE_STRING },
-		[BSS_TM_RESPONSE_STATUS_CODE] = { .name = "status-code", .type = BLOBMSG_TYPE_INT8 },
+		[BSS_TM_RESPONSE_STATUS_CODE] = { .name = "status-code", .type = BLOBMSG_CAST_INT64 },
 	};
 	struct blob_attr *tb[__BSS_TM_RESPONSE_MAX];
 	struct sta_info *si;
 	struct sta *sta;
+	uint8_t status_code;
 	uint8_t *sta_addr;
 
 	blobmsg_parse(policy, __BSS_TM_RESPONSE_MAX, tb, blob_data(msg), blob_len(msg));
 
-	if (!tb[BSS_TM_RESPONSE_ADDRESS] || !tb[BSS_TM_RESPONSE_STATUS_CODE])
+	if (!tb[BSS_TM_RESPONSE_ADDRESS] ||
+	    !usteer_blobmsg_get_u8(tb[BSS_TM_RESPONSE_STATUS_CODE], &status_code))
 		return 0;
 
 	sta_addr = (uint8_t *) ether_aton(blobmsg_get_string(tb[BSS_TM_RESPONSE_ADDRESS]));
@@ -191,7 +217,7 @@ usteer_handle_bss_tm_response(struct usteer_local_node *ln, struct blob_attr *ms
 	if (!si)
 		return 0;
 
-	si->bss_transition_response.status_code = blobmsg_get_u8(tb[BSS_TM_RESPONSE_STATUS_CODE]);
+	si->bss_transition_response.status_code = status_code;
 	si->bss_transition_response.timestamp = current_time;
 
 	if (si->bss_transition_response.status_code && si->kick_time && si->sta->aggressiveness) {

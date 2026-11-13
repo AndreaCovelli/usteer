@@ -268,6 +268,9 @@ static void teardown(void)
 		list_del(&query->list);
 		free(query);
 	}
+	/* A query leaves its timer queued, and the node is about to be cleared */
+	uloop_timeout_cancel(&ap.bss_tm_queries_timeout);
+	uloop_timeout_cancel(&ap5.bss_tm_queries_timeout);
 	usteer_sta_node_cleanup(&ap.node);
 	usteer_sta_node_cleanup(&ap5.node);
 }
@@ -874,13 +877,102 @@ static void test_reassociation_delay(void)
 	puts("ok - reassociation delay: option and requests");
 }
 
-static struct blob_attr *bss_tm_query(const char *addr)
+/*
+ * A notification from hostapd about one station, with one integer field of
+ * the given width. A width of 0 leaves the field out.
+ */
+static struct blob_attr *notification(const char *addr, const char *name,
+				      int bits, uint32_t val)
 {
 	blob_buf_init(&in, 0);
 	blobmsg_add_string(&in, "address", addr);
-	blobmsg_add_u8(&in, "dialog-token", 3);
+	if (bits == 8)
+		blobmsg_add_u8(&in, name, val);
+	else if (bits == 16)
+		blobmsg_add_u16(&in, name, val);
+	else if (bits == 32)
+		blobmsg_add_u32(&in, name, val);
+	else if (bits == 64)
+		blobmsg_add_u64(&in, name, val);
+	else
+		CHECK(!bits);
 
 	return in.head;
+}
+
+static struct blob_attr *bss_tm_query(const char *addr)
+{
+	return notification(addr, "dialog-token", 8, 3);
+}
+
+/*
+ * hostapd sends the dialog token and the status code as 8-bit integers up to
+ * OpenWrt 25.12 and as 32-bit integers after it.
+ */
+static void test_bss_tm_field_widths(void)
+{
+	static const int widths[] = { 8, 16, 32, 64 };
+	const char *addr = addresses[CONTROL];
+	struct sta_info *si;
+	uint32_t val;
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(widths); i++) {
+		int bits = widths[i];
+
+		/* A query is answered with the dialog token of the station */
+		fixture();
+		si = infos[CONTROL];
+		CHECK(usteer_handle_bss_tm_query(&ap, notification(addr, "dialog-token", bits, 200)) == 1);
+		usteer_local_node_process_bss_tm_queries(&ap.bss_tm_queries_timeout);
+		CHECK(tm[CONTROL] == 1 && request_u32("dialog_token", &val) && val == 200);
+
+		/* A station that refuses a request is not kicked for it ... */
+		CHECK(usteer_policy_can_perform_roam(si));
+		si->kick_time = current_time + 10000;
+		current_time += 500;
+		CHECK(usteer_handle_bss_tm_response(&ap, notification(addr, "status-code", bits, 7)) == 0);
+		CHECK(si->bss_transition_response.status_code == 7);
+		CHECK(si->bss_transition_response.timestamp == current_time);
+		CHECK(!si->kick_time);
+
+		/* ... and is left alone for steer_reject_timeout */
+		CHECK(!usteer_policy_can_perform_roam(si));
+		current_time += config.steer_reject_timeout;
+		CHECK(usteer_policy_can_perform_roam(si));
+
+		/* A station that accepts keeps the kick as its deadline */
+		si->kick_time = current_time + 10000;
+		CHECK(usteer_handle_bss_tm_response(&ap, notification(addr, "status-code", bits, 0)) == 0);
+		CHECK(!si->bss_transition_response.status_code);
+		CHECK(si->bss_transition_response.timestamp == current_time);
+		CHECK(si->kick_time == current_time + 10000);
+	}
+
+	/* Values that do not fit the 8-bit field are not truncated to it */
+	fixture();
+	si = infos[CONTROL];
+	si->kick_time = current_time + 10000;
+	CHECK(usteer_handle_bss_tm_query(&ap, notification(addr, "dialog-token", 32, 256)) == 0);
+	CHECK(usteer_handle_bss_tm_response(&ap, notification(addr, "status-code", 32, 256)) == 0);
+	CHECK(usteer_handle_bss_tm_response(&ap, notification(addr, "status-code", 32, 0x107)) == 0);
+
+	/* A missing field or one that is not an integer is ignored */
+	CHECK(usteer_handle_bss_tm_query(&ap, notification(addr, "dialog-token", 0, 0)) == 0);
+	CHECK(usteer_handle_bss_tm_response(&ap, notification(addr, "status-code", 0, 0)) == 0);
+	notification(addr, "dialog-token", 0, 0);
+	blobmsg_add_string(&in, "dialog-token", "3");
+	CHECK(usteer_handle_bss_tm_query(&ap, in.head) == 0);
+	notification(addr, "status-code", 0, 0);
+	blobmsg_add_string(&in, "status-code", "7");
+	CHECK(usteer_handle_bss_tm_response(&ap, in.head) == 0);
+
+	CHECK(list_empty(&ap.bss_tm_queries));
+	CHECK(!si->bss_transition_response.timestamp);
+	CHECK(si->kick_time == current_time + 10000);
+	CHECK(!calls[CONTROL]);
+
+	puts("ok - BSS transition notifications with 8-bit to 64-bit fields");
 }
 
 static void test_requests_to_hostapd(void)
@@ -953,6 +1045,7 @@ int main(void)
 	test_band_steering();
 	test_load();
 	test_reassociation_delay();
+	test_bss_tm_field_widths();
 	test_requests_to_hostapd();
 
 	teardown();
