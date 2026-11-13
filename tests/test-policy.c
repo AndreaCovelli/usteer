@@ -481,30 +481,30 @@ static void test_aggressiveness_list(void)
 	/* first well-formed match wins, other stations use the default */
 	CHECK(aggressiveness_of("02:00:00:00:00:1a") == 1);
 	CHECK(aggressiveness_of("02:00:00:00:00:1b") == 0);
-	CHECK(config.aggressiveness == 3);
-	CHECK(aggressiveness_of("02:00:00:00:00:1c") == 3);
+	CHECK(config.aggressiveness == 2);
+	CHECK(aggressiveness_of("02:00:00:00:00:1c") == 2);
 
 	/* A reload without the option clears the list */
 	cfg_begin();
 	cfg_apply("set_config");
 	get_config();
 	CHECK(!field(reply, "aggressiveness_mac_list"));
-	CHECK(aggressiveness_of("02:00:00:00:00:1d") == 3);
+	CHECK(aggressiveness_of("02:00:00:00:00:1d") == 2);
 
 	/* ... also for the stations that were created while it was set */
-	CHECK(known_aggressiveness_of("02:00:00:00:00:1a") == 3);
-	CHECK(known_aggressiveness_of("02:00:00:00:00:1b") == 3);
+	CHECK(known_aggressiveness_of("02:00:00:00:00:1a") == 2);
+	CHECK(known_aggressiveness_of("02:00:00:00:00:1b") == 2);
 
 	/*
 	 * A reload reaches the stations that are already known: a new entry,
 	 * a changed entry, a removed entry and a new default.
 	 */
 	cfg_begin();
-	cfg_list("aggressiveness_mac_list", "02:00:00:00:00:1a,2",
+	cfg_list("aggressiveness_mac_list", "02:00:00:00:00:1a,3",
 		 "02:00:00:00:00:1c,4", NULL);
 	cfg_apply("set_config");
-	CHECK(known_aggressiveness_of("02:00:00:00:00:1a") == 2);
-	CHECK(known_aggressiveness_of("02:00:00:00:00:1b") == 3);
+	CHECK(known_aggressiveness_of("02:00:00:00:00:1a") == 3);
+	CHECK(known_aggressiveness_of("02:00:00:00:00:1b") == 2);
 	CHECK(known_aggressiveness_of("02:00:00:00:00:1c") == 4);
 
 	cfg_begin();
@@ -900,6 +900,88 @@ static struct blob_attr *notification(const char *addr, const char *name,
 	return in.head;
 }
 
+/* The last request to hostapd announces a disassociation, with this timer */
+static bool request_disassoc_timer(uint32_t *timer)
+{
+	struct blob_attr *attr = field(request, "disassociation_imminent");
+
+	return attr && blobmsg_get_bool(attr) &&
+	       request_u32("disassociation_timer", timer);
+}
+
+/*
+ * One band steering interval with the default settings for a station with a
+ * good signal, and the request it ends with.
+ */
+static void default_band_steering_interval(void)
+{
+	unsigned int passes = config.band_steering_interval / config.local_sta_update;
+	struct sta_info *si = infos[CONTROL];
+
+	si->signal = -50;
+	hear_on_5ghz(CONTROL);
+	while (passes--)
+		usteer_band_steering_perform_steer(&ap);
+	CHECK(!calls[CONTROL] && !si->kick_time);
+	usteer_band_steering_perform_steer(&ap);
+	CHECK(tm[CONTROL] == 1 && calls[CONTROL] == 1);
+	CHECK(si->kick_time == current_time + config.roam_kick_delay);
+}
+
+static void test_defaults(void)
+{
+	const char *addr = addresses[CONTROL];
+	struct sta_info *si;
+	uint32_t timer;
+
+	fixture();
+	cfg_begin();
+	cfg_apply("set_config");
+	si = infos[CONTROL];
+	CHECK(config.aggressiveness == 2 && si->sta->aggressiveness == 2);
+	CHECK(config.band_steering_interval == 120 * 1000);
+	CHECK(config.local_sta_update == 1000);
+	CHECK(!config.band_steering_signal_threshold);
+
+	/*
+	 * A 2.4 GHz station with a steady, good signal is asked to move once
+	 * per interval. The request announces a disassociation but carries
+	 * no timer, so hostapd does not disconnect the station on its own.
+	 */
+	default_band_steering_interval();
+	CHECK(request_disassoc_timer(&timer) && !timer);
+
+	/* A station that refuses stays connected */
+	CHECK(usteer_handle_bss_tm_response(&ap, notification(addr, "status-code", 8, 7)) == 0);
+	CHECK(!si->kick_time);
+	current_time += config.roam_kick_delay + 1;
+	run_kick_passes(2);
+	CHECK(!kicks[CONTROL] && si->connected == STA_CONNECTED);
+
+	/* A station that does not answer is kicked after roam_kick_delay */
+	fixture();
+	cfg_begin();
+	cfg_apply("set_config");
+	si = infos[CONTROL];
+	default_band_steering_interval();
+	current_time += config.roam_kick_delay + 1;
+	usteer_local_node_perform_kick(&ap);
+	CHECK(kicks[CONTROL] == 1 && si->connected == STA_NOT_CONNECTED);
+
+	/*
+	 * From aggressiveness 3 the request carries a timer: hostapd then
+	 * disconnects the station when it expires, whatever the answer.
+	 */
+	fixture();
+	cfg_begin();
+	blobmsg_add_u32(&in, "aggressiveness", 3);
+	cfg_apply("set_config");
+	default_band_steering_interval();
+	CHECK(request_disassoc_timer(&timer) && timer);
+
+	puts("ok - defaults: steering without a disassociation timer");
+}
+
 static struct blob_attr *bss_tm_query(const char *addr)
 {
 	return notification(addr, "dialog-token", 8, 3);
@@ -1046,6 +1128,7 @@ int main(void)
 	test_load();
 	test_reassociation_delay();
 	test_bss_tm_field_widths();
+	test_defaults();
 	test_requests_to_hostapd();
 
 	teardown();

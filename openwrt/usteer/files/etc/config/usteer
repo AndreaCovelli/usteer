@@ -75,10 +75,13 @@ config usteer
 
 	# Aggressiveness of BSS-transition-request to push a station to another node (AP or band)
 	# 0 = no active transition / 1 = passive BSS-transition-request
-	# 2 = BSS-transition-request with disassociation imminent
-	# 3 = BSS-transition-request with disassociation imminent and timer
-	# 4 = BSS-transition-request with disassociation imminent, timer and forced disassociation
-	#option aggressiveness 3
+	# 2 = BSS-transition-request with disassociation imminent. usteer kicks the station
+	#     after roam_kick_delay, unless the station rejects the request
+	# 3 = BSS-transition-request with disassociation imminent and timer. hostapd
+	#     disassociates the station when the timer expires, also when the station
+	#     rejected the request
+	# 4 = currently the same as 3
+	#option aggressiveness 2
 
 	# Timeout (s in "1024ms") a station is requested to avoid reassociation after bss transition
 	#option reassociation_delay 30
@@ -137,7 +140,7 @@ config usteer
 
 	# Attempting to steer clients to a higher frequency-band every n ms.
 	# A value of 0 disabled band-steering.
-	#option band_steering_interval 30000
+	#option band_steering_interval 120000
 
 	# Minimal SNR or absolute signal a device has to maintain over band_steering_interval to be
 	# steered to a higher frequency band
@@ -145,8 +148,9 @@ config usteer
 
 	# SNR difference that the signal must be better compared to signal was on connection to node.
 	# Avoids conflicts between roaming and band-steering policies.
-	# A value of 0 disables threshold.
-	#option band_steering_signal_threshold 5
+	# A value of 0 disables threshold. With a threshold, a station whose signal stays
+	# where it was when it connected is never steered.
+	#option band_steering_signal_threshold 0
 
 	# Interval (ms) the device is sent a link-measurement request to help assess
 	# the bi-directional link quality. Setting the interval to 0 disables link-measurements.
